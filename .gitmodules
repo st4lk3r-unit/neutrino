@@ -1,0 +1,3 @@
+[submodule "netrino-core/lib/konsole"]
+	path = netrino-core/lib/konsole
+	url = https://github.com/st4lk3r-unit/konsole

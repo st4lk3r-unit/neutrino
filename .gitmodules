@@ -1,3 +1,9 @@
 [submodule "neutrino/lib/konsole"]
 	path = neutrino/lib/konsole
 	url = https://github.com/st4lk3r-unit/konsole
+[submodule "neutrino/lib/SGFX"]
+	path = neutrino/lib/SGFX
+	url = https://github.com/st4lk3r-unit/SGFX
+[submodule "neutrino/lib/RadioLib"]
+	path = neutrino/lib/RadioLib
+	url = https://github.com/jgromes/RadioLib

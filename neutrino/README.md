@@ -1,9 +1,9 @@
 # Neutrino — cross-MCU PlatformIO firmware template
 
 Neutrino is a minimal, architecture-agnostic firmware skeleton for embedded systems.
-It wires together a UART CLI ([konsole](https://github.com/your-org/konsole)),
-optional display ([SGFX](https://github.com/your-org/SGFX)),
-optional hardware integration ([SIC](https://github.com/your-org/SIC)),
+It wires together a UART CLI ([konsole](https://github.com/st4lk3r-unit/konsole)),
+optional display ([SGFX](https://github.com/st4lk3r-unit/SGFX)),
+optional hardware integration ([SIC](https://github.com/st4lk3r-unit/SIC)),
 and optional LoRa radio ([RadioLib](https://github.com/jgromes/RadioLib)).
 
 All platform-specific code is isolated behind an `arch_api_t` vtable — the application
@@ -16,7 +16,7 @@ core in `src/` compiles on both native (PC) and any supported MCU without change
 This repo uses **git submodules** (konsole, SGFX, SIC, RadioLib):
 
 ```sh
-git clone --recurse-submodules https://github.com/your-org/neutrino.git
+git clone --recurse-submodules https://github.com/st4lk3r-unit/neutrino.git
 cd neutrino/neutrino
 ```
 

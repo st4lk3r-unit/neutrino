@@ -5,8 +5,5 @@
 	path = neutrino/lib/SGFX
 	url = https://github.com/st4lk3r-unit/SGFX
 [submodule "neutrino/lib/SIC"]
-    path = neutrino/lib/SIC
-    url = https://github.com/st4lk3r-unit/SIC
-[submodule "neutrino/lib/RadioLib"]
-	path = neutrino/lib/RadioLib
-	url = https://github.com/jgromes/RadioLib
+	path = neutrino/lib/SIC
+	url = https://github.com/st4lk3r-unit/SIC

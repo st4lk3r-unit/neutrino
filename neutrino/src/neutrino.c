@@ -310,36 +310,42 @@ static size_t io_write(void *ctx, const uint8_t *buf, size_t len) {
 #if defined(NEU_USE_SIC)
 #  include <math.h>
 #  include "sic/sic.h"
-#  include "sic/audio.h"        /* sic_codec_write */
 #  include "sic/audio/mic.h"    /* mic_t vtable */
 #  include "sic/audio/amp.h"    /* amp_t vtable */
 #  include "sic/bus/i2c_bus.h"  /* sic_i2c_writeread for raw register access */
 
-   static unsigned long long s_kbd_bm_prev = 0;
-   static int s_caps_lock = 0;
+   static void kbd_push_csi(char final) {
+     kbd_push(0x1b); kbd_push('['); kbd_push((uint8_t)final);
+   }
+
+   static void kbd_push_key_event(const sic_key_event_t* ev) {
+     if (!ev || !ev->pressed) return;
+
+     /* Let SIC own all board-specific keymap, modifier, caps, and Fn logic.
+      * Neutrino only translates abstract key events into console bytes. */
+     switch (ev->code) {
+       case SIC_KEY_BACKSPACE: kbd_push(0x08); return;
+       case SIC_KEY_TAB:       kbd_push(0x09); return;
+       case SIC_KEY_ENTER:     kbd_push(0x0d); return;
+       case SIC_KEY_ESC:       kbd_push(0x1b); return;
+       case SIC_KEY_LEFT:      kbd_push_csi('D'); return;
+       case SIC_KEY_RIGHT:     kbd_push_csi('C'); return;
+       case SIC_KEY_UP:        kbd_push_csi('A'); return;
+       case SIC_KEY_DOWN:      kbd_push_csi('B'); return;
+       case SIC_KEY_DEL:       kbd_push(0x1b); kbd_push('['); kbd_push('3'); kbd_push('~'); return;
+       default: break;
+     }
+
+     if (ev->ascii) kbd_push((uint8_t)ev->ascii);
+   }
 
    static void neu_kbd_poll(void) {
-     const kscan_t* kbd = sic_kbd(0);
-     if (!kbd) return;
-     unsigned long long bm = 0;
-     if (kscan_read_bitmap(kbd, &bm) < 0) return;
-     unsigned long long consumed   = kbd->modifier_mask | kbd->shift_mask;
-     unsigned long long mod_held   = bm & kbd->modifier_mask;
-     unsigned long long shift_held = bm & kbd->shift_mask;
-     unsigned long long newly_pressed = (bm ^ s_kbd_bm_prev) & bm & ~consumed;
-     s_kbd_bm_prev = bm;
-     for (int b = 0; b < 64; b++) {
-       if (!(newly_pressed & (1ULL << b))) continue;
-       char c;
-       if (mod_held && kbd->keymap_alt) {
-         c = kbd->keymap_alt(b);
-         if (c == SIC_KEY_CAPS_LOCK) { s_caps_lock ^= 1; continue; }
-       } else {
-         c = kbd->keymap ? kbd->keymap(b) : 0;
-         if (c >= 'a' && c <= 'z' && (shift_held || s_caps_lock))
-           c = (char)(c - 'a' + 'A');
-       }
-       if (c) kbd_push((uint8_t)c);
+     sic_key_event_t ev;
+     /* Drain a bounded burst so quick chords don't starve the console loop. */
+     for (int i = 0; i < 8; ++i) {
+       int rc = sic_key_poll(&ev);
+       if (rc <= 0) break;
+       kbd_push_key_event(&ev);
      }
    }
 
@@ -487,26 +493,40 @@ static size_t io_write(void *ctx, const uint8_t *buf, size_t len) {
    static int cmd_amp(struct konsole *ks, int argc, char **argv) {
      (void)argc; (void)argv;
      const amp_t* amp = sic_amp(0);
-     if (!amp) { kon_printf(ks, "amp: not available\r\n"); return -1; }
+     if (!amp || !amp->v) { kon_printf(ks, "amp: not available\r\n"); return -1; }
      kon_printf(ks, "amp: 1kHz 500ms... ");
-     amp->v->enable(amp, 1);
-     /* Write 1kHz sine to the codec DAC while amp is enabled */
-     const int sr = 16000;
-     const int total = sr / 2;  /* 500ms worth of samples */
-     static int16_t buf[128];
-     float w = 2.0f * 3.14159265f * 1000.0f / (float)sr;
-     int sent = 0;
-     while (sent < total) {
-       int chunk = total - sent;
-       if (chunk > 128) chunk = 128;
-       for (int i = 0; i < chunk; i++)
-         buf[i] = (int16_t)(sinf(w * (sent + i)) * 16000);
-       sic_codec_write(buf, chunk);
-       sent += chunk;
+
+     /* Keep codec/I2S details inside SIC.  Neutrino should only use the
+      * abstract amp contract; board-specific routing belongs in SIC drivers.
+      */
+     if (amp->v->beep_ms) {
+       int r = amp->v->beep_ms(amp, 500);
+       kon_printf(ks, "%s\r\n", r >= 0 ? "off" : "failed");
+       return r >= 0 ? 0 : -1;
      }
-     amp->v->enable(amp, 0);
-     kon_printf(ks, "off\r\n");
-     return 0;
+
+     if (amp->v->play_mono) {
+       const int sr = 16000;
+       const int total = sr / 2;  /* 500ms worth of samples */
+       static int16_t buf[8000];
+       float w = 2.0f * 3.14159265f * 1000.0f / (float)sr;
+       for (int i = 0; i < total; i++)
+         buf[i] = (int16_t)(sinf(w * i) * 12000);
+       int n = amp->v->play_mono(amp, buf, total, sr);
+       kon_printf(ks, "%s\r\n", n > 0 ? "off" : "failed");
+       return n > 0 ? 0 : -1;
+     }
+
+     if (amp->v->enable) {
+       amp->v->enable(amp, 1);
+       A->delay_ms(500);
+       amp->v->enable(amp, 0);
+       kon_printf(ks, "toggle-only\r\n");
+       return 0;
+     }
+
+     kon_printf(ks, "unsupported\r\n");
+     return -1;
    }
 
    /* bat: battery voltage + charger state */
@@ -639,9 +659,13 @@ int neutrino_init(void) {
   sic_i2c_begin(I2C_SDA_PIN, I2C_SCL_PIN, 400000);
   kon_printf(&g_ks, "[SIC] I2C bus 0 init SDA=%d SCL=%d\r\n", I2C_SDA_PIN, I2C_SCL_PIN);
 #  endif
-  { int r = sic_begin_legacy(&NEU_SIC_BOARD, NULL);
-    kon_printf(&g_ks, "[SIC] begin rc=%d kbd=%s\r\n",
-               r, sic_kbd(0) ? "ok" : "NONE"); }
+  { const sic_board_t* board = sic_board_default();
+#  if defined(NEU_SIC_BOARD)
+    if (!board) board = &NEU_SIC_BOARD;
+#  endif
+    int r = sic_begin_legacy(board, NULL);
+    kon_printf(&g_ks, "[SIC] board=%s begin rc=%d kbd=%s\r\n",
+               board ? board->name : "none", r, sic_kbd(0) ? "ok" : "NONE"); }
 #endif
 
 #if defined(NEU_USE_SGFX)
